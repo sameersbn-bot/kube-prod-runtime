@@ -11,8 +11,8 @@
 import groovy.json.JsonOutput
 import org.jenkinsci.plugins.pipeline.modeldefinition.Utils
 
-def parentZone = 'tests.bkpr.run'
-def parentZoneResourceGroup = 'jenkins-bkpr-rg'
+def parentZone = 'tests.fuloi.org'
+def parentZoneResourceGroup = 'jenkins-sameer-rg'
 
 // Force using our pod
 def label = env.BUILD_TAG.replaceAll(/[^a-zA-Z0-9-]/, '-').toLowerCase()
@@ -54,7 +54,7 @@ done
 }
 
 def insertGlueRecords(String name, java.util.ArrayList nameServers, String ttl, String zone, String resourceGroup) {
-    withCredentials([azureServicePrincipal('jenkins-bkpr-owner-sp')]) {
+    withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
         container('az') {
             sh "az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID"
             sh "az account set -s \$AZURE_SUBSCRIPTION_ID"
@@ -67,7 +67,7 @@ def insertGlueRecords(String name, java.util.ArrayList nameServers, String ttl, 
 }
 
 def deleteGlueRecords(String name, String zone, String resourceGroup) {
-    withCredentials([azureServicePrincipal('jenkins-bkpr-owner-sp')]) {
+    withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
         container('az') {
             sh "az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID"
             sh "az account set -s \$AZURE_SUBSCRIPTION_ID"
@@ -191,7 +191,7 @@ spec:
             if (env.TAG_NAME) {
                 withGo() {
                     withEnv(["PATH+JQ=${tool 'jq'}"]) {
-                        withCredentials([usernamePassword(credentialsId: 'github-bitnami-bot', passwordVariable: 'GITHUB_TOKEN', usernameVariable: '')]) {
+                        withCredentials([usernamePassword(credentialsId: 'sameersbn-github', passwordVariable: 'GITHUB_TOKEN', usernameVariable: '')]) {
                             sh "make release-notes VERSION=${TAG_NAME}"
                         }
                         stash includes: 'Release_Notes.md', name: 'release-notes'
@@ -267,8 +267,8 @@ spec:
                         dir('src/github.com/bitnami/kube-prod-runtime') {
                             // NB: `kubeprod` also uses az cli credentials and
                             // $AZURE_SUBSCRIPTION_ID, $AZURE_TENANT_ID.
-                            withCredentials([azureServicePrincipal('jenkins-bkpr-owner-sp')]) {
-                                def resourceGroup = 'jenkins-bkpr-rg'
+                            withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
+                                def resourceGroup = 'jenkins-sameer-rg'
                                 def clusterName = ("${env.BRANCH_NAME}".take(8) + "-${env.BUILD_NUMBER}-" + UUID.randomUUID().toString().take(5) + "-${platform}").replaceAll(/[^a-zA-Z0-9-]/, '-').replaceAll(/--/, '-').toLowerCase()
                                 def dnsPrefix = "${clusterName}"
                                 def dnsZone = "${dnsPrefix}.${parentZone}"
@@ -289,7 +289,7 @@ az account set -s $AZURE_SUBSCRIPTION_ID
                                             // a) avoid this leak b) avoid having to give the
                                             // "outer" principal (above) the power to create
                                             // new service principals.
-                                            withCredentials([azureServicePrincipal('jenkins-bkpr-contributor-sp')]) {
+                                            withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
                                                 sh """
 az aks create                      \
  --verbose                         \
@@ -312,7 +312,7 @@ az aks create                      \
                                         }
 
                                         // Reuse this service principal for externalDNS and oauth2.  A real (paranoid) production setup would use separate minimal service principals here.
-                                        withCredentials([azureServicePrincipal('jenkins-bkpr-contributor-sp')]) {
+                                        withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
                                             // NB: writeJSON doesn't work without approvals(?)
                                             // See https://issues.jenkins-ci.org/browse/JENKINS-44587
                                             writeFile([file: "${clusterName}-autogen.json", text: """
@@ -491,18 +491,18 @@ gcloud container clusters create ${clusterName} \
                             unstash 'src'
                             unstash 'release-notes'
 
-                            sh "make dist VERSION=${TAG_NAME}"
+                            sh "make dist VERSION=${TAG_NAME} RELEASES_BASE_URL=https://sameer-bkpr-releases.s3-us-west-1.amazonaws.com"
 
                             withCredentials([
-                                usernamePassword(credentialsId: 'github-bitnami-bot', passwordVariable: 'GITHUB_TOKEN', usernameVariable: ''),
+                                usernamePassword(credentialsId: 'sameersbn-github', passwordVariable: 'GITHUB_TOKEN', usernameVariable: 'GITHUB_USER'),
                                 [
                                 $class: 'AmazonWebServicesCredentialsBinding',
-                                credentialsId: 'jenkins-bkpr-releases',
+                                credentialsId: 'sameer-bkpr-releases',
                                 accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                                 secretKeyVariable: 'AWS_SECRET_ACCESS_KEY',
                                 ]
                             ]) {
-                                sh "make publish VERSION=${TAG_NAME}"
+                                sh "make publish VERSION=${TAG_NAME} AWS_DEFAULT_REGION=us-west-1 AWS_S3_BUCKET=sameer-bkpr-releases"
                             }
                         }
                     }
