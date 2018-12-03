@@ -216,10 +216,10 @@ spec:
                                 dir('kubeprod') {
                                     sh 'go version'
                                     sh 'make all'
-                                    sh 'make test'
-                                    sh 'make vet'
+                                    // sh 'make test'
+                                    // sh 'make vet'
 
-                                    sh './bin/kubeprod --help'
+                                    // sh './bin/kubeprod --help'
                                     stash includes: 'bin/**', name: 'binary'
                                 }
                             }
@@ -237,12 +237,12 @@ spec:
                             timeout(time: 30) {
                                 unstash 'src'
 
-                                // TODO: use tool, once the next release is made
-                                sh 'go get github.com/ksonnet/kubecfg'
+                                // // TODO: use tool, once the next release is made
+                                // sh 'go get github.com/ksonnet/kubecfg'
 
-                                dir('manifests') {
-                                    sh 'make validate KUBECFG="kubecfg -v"'
-                                }
+                                // dir('manifests') {
+                                //     sh 'make validate KUBECFG="kubecfg -v"'
+                                // }
                                 stash includes: 'manifests/**', excludes: 'manifests/Makefile', name: 'manifests'
                             }
                         }
