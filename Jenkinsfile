@@ -253,125 +253,125 @@ spec:
 
     def platforms = [:]
 
-    // See:
-    //  az aks get-versions -l centralus
-    //    --query 'sort(orchestrators[?orchestratorType==`Kubernetes`].orchestratorVersion)'
-    def aksKversions = ["1.10.8", "1.11.5"]
-    for (x in aksKversions) {
-        def kversion = x  // local bind required because closures
-        def platform = "aks-" + kversion
-        platforms[platform] = {
-            stage(platform) {
-                node(label) {
-                    withGo() {
-                        dir('src/github.com/bitnami/kube-prod-runtime') {
-                            // NB: `kubeprod` also uses az cli credentials and
-                            // $AZURE_SUBSCRIPTION_ID, $AZURE_TENANT_ID.
-                            withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
-                                def resourceGroup = 'jenkins-sameer-rg'
-                                def clusterName = ("${env.BRANCH_NAME}".take(8) + "-${env.BUILD_NUMBER}-" + UUID.randomUUID().toString().take(5) + "-${platform}").replaceAll(/[^a-zA-Z0-9-]/, '-').replaceAll(/--/, '-').toLowerCase()
-                                def dnsPrefix = "${clusterName}"
-                                def dnsZone = "${dnsPrefix}.${parentZone}"
-                                def adminEmail = "${clusterName}@${parentZone}"
-                                def location = "eastus"
+//     // See:
+//     //  az aks get-versions -l centralus
+//     //    --query 'sort(orchestrators[?orchestratorType==`Kubernetes`].orchestratorVersion)'
+//     def aksKversions = ["1.10.8", "1.11.5"]
+//     for (x in aksKversions) {
+//         def kversion = x  // local bind required because closures
+//         def platform = "aks-" + kversion
+//         platforms[platform] = {
+//             stage(platform) {
+//                 node(label) {
+//                     withGo() {
+//                         dir('src/github.com/bitnami/kube-prod-runtime') {
+//                             // NB: `kubeprod` also uses az cli credentials and
+//                             // $AZURE_SUBSCRIPTION_ID, $AZURE_TENANT_ID.
+//                             withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
+//                                 def resourceGroup = 'jenkins-sameer-rg'
+//                                 def clusterName = ("${env.BRANCH_NAME}".take(8) + "-${env.BUILD_NUMBER}-" + UUID.randomUUID().toString().take(5) + "-${platform}").replaceAll(/[^a-zA-Z0-9-]/, '-').replaceAll(/--/, '-').toLowerCase()
+//                                 def dnsPrefix = "${clusterName}"
+//                                 def dnsZone = "${dnsPrefix}.${parentZone}"
+//                                 def adminEmail = "${clusterName}@${parentZone}"
+//                                 def location = "eastus"
 
-                                try {
-                                    runIntegrationTest(platform, "aks --config=${clusterName}-autogen.json --dns-resource-group=${resourceGroup} --dns-zone=${dnsZone} --email=${adminEmail}", "--dns-suffix ${dnsZone}") {
-                                        container('az') {
-                                            sh '''
-az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET -t $AZURE_TENANT_ID
-az account set -s $AZURE_SUBSCRIPTION_ID
-'''
+//                                 try {
+//                                     runIntegrationTest(platform, "aks --config=${clusterName}-autogen.json --dns-resource-group=${resourceGroup} --dns-zone=${dnsZone} --email=${adminEmail}", "--dns-suffix ${dnsZone}") {
+//                                         container('az') {
+//                                             sh '''
+// az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET -t $AZURE_TENANT_ID
+// az account set -s $AZURE_SUBSCRIPTION_ID
+// '''
 
-                                            // Usually, `az aks create` creates a new service
-                                            // principal, which is not removed by `az aks
-                                            // delete`. We reuse an existing principal here to
-                                            // a) avoid this leak b) avoid having to give the
-                                            // "outer" principal (above) the power to create
-                                            // new service principals.
-                                            withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
-                                                sh """
-az aks create                      \
- --verbose                         \
- --resource-group ${resourceGroup} \
- --name ${clusterName}             \
- --node-count 3                    \
- --node-vm-size Standard_DS2_v2    \
- --location ${location}            \
- --kubernetes-version ${kversion}  \
- --generate-ssh-keys               \
- --service-principal \$AZURE_CLIENT_ID \
- --client-secret \$AZURE_CLIENT_SECRET \
- --tags 'platform=${platform}' 'branch=${BRANCH_NAME}' 'build=${BUILD_URL}'
-"""
-                                            }
+//                                             // Usually, `az aks create` creates a new service
+//                                             // principal, which is not removed by `az aks
+//                                             // delete`. We reuse an existing principal here to
+//                                             // a) avoid this leak b) avoid having to give the
+//                                             // "outer" principal (above) the power to create
+//                                             // new service principals.
+//                                             withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
+//                                                 sh """
+// az aks create                      \
+//  --verbose                         \
+//  --resource-group ${resourceGroup} \
+//  --name ${clusterName}             \
+//  --node-count 3                    \
+//  --node-vm-size Standard_DS2_v2    \
+//  --location ${location}            \
+//  --kubernetes-version ${kversion}  \
+//  --generate-ssh-keys               \
+//  --service-principal \$AZURE_CLIENT_ID \
+//  --client-secret \$AZURE_CLIENT_SECRET \
+//  --tags 'platform=${platform}' 'branch=${BRANCH_NAME}' 'build=${BUILD_URL}'
+// """
+//                                             }
 
-                                            sh "az aks get-credentials --name ${clusterName} --resource-group ${resourceGroup} --admin --file \$KUBECONFIG"
+//                                             sh "az aks get-credentials --name ${clusterName} --resource-group ${resourceGroup} --admin --file \$KUBECONFIG"
 
-                                            waitForRollout("kube-system", 30)
-                                        }
+//                                             waitForRollout("kube-system", 30)
+//                                         }
 
-                                        // Reuse this service principal for externalDNS and oauth2.  A real (paranoid) production setup would use separate minimal service principals here.
-                                        withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
-                                            // NB: writeJSON doesn't work without approvals(?)
-                                            // See https://issues.jenkins-ci.org/browse/JENKINS-44587
-                                            writeFile([file: "${clusterName}-autogen.json", text: """
-{
-  "dnsZone": "${dnsZone}",
-  "contactEmail": "${adminEmail}",
-  "externalDns": {
-    "tenantId": "${AZURE_TENANT_ID}",
-    "subscriptionId": "${AZURE_SUBSCRIPTION_ID}",
-    "aadClientId": "${AZURE_CLIENT_ID}",
-    "aadClientSecret": "${AZURE_CLIENT_SECRET}",
-    "resourceGroup": "${resourceGroup}"
-  },
-  "oauthProxy": {
-    "client_id": "${AZURE_CLIENT_ID}",
-    "client_secret": "${AZURE_CLIENT_SECRET}",
-    "azure_tenant": "${AZURE_TENANT_ID}"
-  }
-}
-"""
-                                            ])
+//                                         // Reuse this service principal for externalDNS and oauth2.  A real (paranoid) production setup would use separate minimal service principals here.
+//                                         withCredentials([azureServicePrincipal('jenkins-sameer-sp')]) {
+//                                             // NB: writeJSON doesn't work without approvals(?)
+//                                             // See https://issues.jenkins-ci.org/browse/JENKINS-44587
+//                                             writeFile([file: "${clusterName}-autogen.json", text: """
+// {
+//   "dnsZone": "${dnsZone}",
+//   "contactEmail": "${adminEmail}",
+//   "externalDns": {
+//     "tenantId": "${AZURE_TENANT_ID}",
+//     "subscriptionId": "${AZURE_SUBSCRIPTION_ID}",
+//     "aadClientId": "${AZURE_CLIENT_ID}",
+//     "aadClientSecret": "${AZURE_CLIENT_SECRET}",
+//     "resourceGroup": "${resourceGroup}"
+//   },
+//   "oauthProxy": {
+//     "client_id": "${AZURE_CLIENT_ID}",
+//     "client_secret": "${AZURE_CLIENT_SECRET}",
+//     "azure_tenant": "${AZURE_TENANT_ID}"
+//   }
+// }
+// """
+//                                             ])
 
-                                            writeFile([file: 'kubeprod-manifest.jsonnet', text: """
-(import "manifests/platforms/aks.jsonnet") {
-  config:: import "${clusterName}-autogen.json",
-  letsencrypt_environment: "staging",
-  prometheus+: import "tests/testdata/prometheus-crashloop-alerts.jsonnet",
-}
-"""
-                                            ])
-                                        }
-                                    }{
-                                        // update glue records in parent zone
-                                        container('az') {
-                                            def nameServers = []
-                                            def output = sh(returnStdout: true, script: "az network dns zone show --name ${dnsZone} --resource-group ${resourceGroup} --query nameServers")
-                                            for (ns in readJSON(text: output)) {
-                                                nameServers << ns
-                                            }
-                                            insertGlueRecords(dnsPrefix, nameServers, "60", parentZone, parentZoneResourceGroup)
-                                        }
-                                    }
-                                }
-                                finally {
-                                    container('az') {
-                                        sh "az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID"
-                                        sh "az account set -s \$AZURE_SUBSCRIPTION_ID"
-                                        sh "az network dns zone delete --yes --name ${dnsZone} --resource-group ${resourceGroup} || :"
-                                        sh "az aks delete --yes --name ${clusterName} --resource-group ${resourceGroup} --no-wait || :"
-                                    }
-                                    deleteGlueRecords(dnsPrefix, parentZone, parentZoneResourceGroup)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+//                                             writeFile([file: 'kubeprod-manifest.jsonnet', text: """
+// (import "manifests/platforms/aks.jsonnet") {
+//   config:: import "${clusterName}-autogen.json",
+//   letsencrypt_environment: "staging",
+//   prometheus+: import "tests/testdata/prometheus-crashloop-alerts.jsonnet",
+// }
+// """
+//                                             ])
+//                                         }
+//                                     }{
+//                                         // update glue records in parent zone
+//                                         container('az') {
+//                                             def nameServers = []
+//                                             def output = sh(returnStdout: true, script: "az network dns zone show --name ${dnsZone} --resource-group ${resourceGroup} --query nameServers")
+//                                             for (ns in readJSON(text: output)) {
+//                                                 nameServers << ns
+//                                             }
+//                                             insertGlueRecords(dnsPrefix, nameServers, "60", parentZone, parentZoneResourceGroup)
+//                                         }
+//                                     }
+//                                 }
+//                                 finally {
+//                                     container('az') {
+//                                         sh "az login --service-principal -u \$AZURE_CLIENT_ID -p \$AZURE_CLIENT_SECRET -t \$AZURE_TENANT_ID"
+//                                         sh "az account set -s \$AZURE_SUBSCRIPTION_ID"
+//                                         sh "az network dns zone delete --yes --name ${dnsZone} --resource-group ${resourceGroup} || :"
+//                                         sh "az aks delete --yes --name ${clusterName} --resource-group ${resourceGroup} --no-wait || :"
+//                                     }
+//                                     deleteGlueRecords(dnsPrefix, parentZone, parentZoneResourceGroup)
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }
 
     // See:
     //  gcloud container get-server-config
